@@ -1,4 +1,4 @@
-name: Kdenlive KF6 & OTIO Final Build
+name: Kdenlive KF6 Build
 
 on:
   push:
@@ -7,65 +7,34 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+    container:
+      image: kdeneon/all-kf6-qt6:latest
     permissions:
       contents: write
 
     steps:
-      - name: Checkout
+      - name: Checkout Source
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Add Repositories
+      - name: Install Missing Build Tools
         run: |
-          sudo add-apt-repository -y ppa:kubuntu-ppa/backports
-          sudo add-apt-repository -y ppa:kdenlive/kdenlive-master
-          sudo apt update
-
-      - name: Install Toolchain & Build Tools
-        run: |
-          sudo apt install -y build-essential git cmake extra-cmake-modules ninja-build \
-            gettext python3-dev swig
-
-      - name: Install Qt6 & KF6 SDK
-        run: |
-          sudo apt install -y qt6-base-dev qt6-svg-dev qt6-multimedia-dev qt6-networkauth-dev \
-            qt6-declarative-private-dev qml6-module-qtqml-workerscript \
-            qml6-module-qtquick-window qml6-module-qtquick-controls \
-            qml6-module-qtquick-layouts qml6-module-qtquick-templates \
-            libkf6archive-dev libkf6bookmarks-dev libkf6codecs-dev libkf6config-dev \
-            libkf6configwidgets-dev libkf6coreaddons-dev libkf6crash-dev \
-            libkf6dbusaddons-dev libkf6doctools-dev libkf6filemetadata-dev \
-            libkf6guiaddons-dev libkf6iconthemes-dev libkf6kio-dev libkf6newstuff-dev \
-            libkf6notifications-dev libkf6notifyconfig-dev libkf6purpose-dev \
-            libkf6solid-dev libkf6textwidgets-dev libkf6widgetsaddons-dev \
-            libkf6xmlgui-dev kf6-breeze-icon-theme
-
-      - name: Install Multimedia Stack (Excluding OTIO)
-        run: |
-          sudo apt install -y frei0r-plugins ffmpeg mediainfo ladspa-sdk libfftw3-dev \
-            libarchive-dev libgdk-pixbuf-2.0-dev libsdl2-dev libxml2-dev libavdevice-dev \
-            librtaudio-dev libsox-dev libmovit-dev librubberband-dev libswscale-dev \
-            libebur128-dev libopencv-dev libsamplerate0-dev libvidstab-dev libexif-dev \
-            libpango1.0-dev libvorbis-dev libavformat-dev libavcodec-dev \
-            libswresample-dev libavutil-dev
-
-      - name: Build & Install OpenTimelineIO (OTIO)
-        run: |
-          git clone --depth 1 https://github.com/PixarAnimationStudios/OpenTimelineIO.git
-          cd OpenTimelineIO
-          mkdir build && cd build
-          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DOTIO_PYTHON_INSTALL=OFF -DCMAKE_INSTALL_PREFIX=/usr
-          sudo ninja install
-          cd ../..
+          apt update
+          apt install -y build-essential git cmake ninja-build gettext \
+            python3-dev swig libarchive-dev libsdl2-dev libxml2-dev \
+            libavdevice-dev librtaudio-dev libsox-dev libmovit-dev \
+            librubberband-dev libebur128-dev libopencv-dev \
+            libsamplerate0-dev libvidstab-dev libexif-dev libpango1.0-dev \
+            libvorbis-dev libopentimelineio-dev || echo "Some dev-tools already present"
 
       - name: Build & Install MLT v7
         run: |
           git clone --depth 1 --recurse-submodules https://github.com/mltframework/mlt.git
           cd mlt && mkdir build && cd build
           cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DMOD_QT=OFF -DMOD_QT6=ON -DMOD_GLAXNIMATE_QT6=ON -DCMAKE_INSTALL_PREFIX=/usr
-          sudo ninja install
+          ninja install
           cd ../..
 
       - name: Build Kdenlive
@@ -78,25 +47,26 @@ jobs:
             -DBUILD_TESTING=OFF \
             -DCMAKE_INSTALL_PREFIX=/usr
           ninja
-          DESTDIR=/tmp/kdenlive_install sudo ninja install
+          DESTDIR=/tmp/kdenlive_install ninja install
 
       - name: Package AppImage
         run: |
+          apt install -y wget file
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
           export AppDir=/tmp/kdenlive_install
           VERSION=$(date +%Y%m%d)-${GITHUB_SHA:0:7}
-          export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+          export APPIMAGE_EXTRACT_AND_RUN=1
           ./linuxdeploy-x86_64.AppImage --appdir $AppDir --plugin qt --output appimage
           mv Kdenlive-x86_64.AppImage kdenlive-${VERSION}-x86_64.AppImage
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: release-${{ github.run_id }}
-          name: "Kdenlive KF6 Custom Release"
+          tag_name: rel-${{ github.run_id }}
+          name: "Kdenlive KF6 Container Build"
           files: "*.AppImage"
           body: |
-            Build success with manually compiled OpenTimelineIO and MLT.
-            Commit: ${{ github.sha }}
+            Successfully built using KDE Neon KF6 Docker Image.
+            Hash: ${{ github.sha }}
