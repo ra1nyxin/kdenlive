@@ -1,0 +1,83 @@
+name: Kdenlive Auto Build & Release
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential git cmake extra-cmake-modules ninja-build gettext
+          sudo apt install -y qt6-base-dev qt6-svg-dev qt6-multimedia-dev qt6-networkauth-dev \
+            qml6-module-qtqml-workerscript qml6-module-qtquick-window qml6-module-org-kde-desktop \
+            qt6-declarative-private-dev libkf6archive-dev libkf6bookmarks-dev libkf6codecs-dev \
+            libkf6config-dev libkf6configwidgets-dev libkf6coreaddons-dev libkf6crash-dev \
+            libkf6dbusaddons-dev libkf6doctools-dev libkf6filemetadata-dev libkf6guiaddons-dev \
+            libkf6iconthemes-dev libkf6kio-dev libkf6newstuff-dev libkf6notifications-dev \
+            libkf6notifyconfig-dev libkf6purpose-dev libkf6solid-dev libkf6textwidgets-dev \
+            libkf6widgetsaddons-dev libkf6xmlgui-dev kde-style-breeze
+          sudo apt install -y frei0r-plugins ffmpeg mediainfo ladspa-sdk libfftw3-dev \
+            libarchive-dev libgdk-pixbuf-2.0-dev libsdl2-dev libxml2-dev libavdevice-dev \
+            librtaudio-dev libsox-dev frei0r-plugins-dev libmovit-dev librubberband-dev \
+            libswscale-dev libebur128-dev libopencv-dev libsamplerate0-dev libvidstab-dev \
+            libexif-dev libpango1.0-dev libvorbis-dev libavformat-dev libavcodec-dev \
+            libswresample-dev libavutil-dev libopentimelineio-dev
+          sudo apt install -y kddockwidgets-qt6-dev || echo "KDDockWidgets not found, will build later if needed"
+
+      - name: Build & Install MLT (Latest)
+        run: |
+          git clone --recurse-submodules https://github.com/mltframework/mlt.git
+          cd mlt
+          mkdir build && cd build
+          cmake .. -GNinja -DMOD_QT=OFF -DMOD_QT6=ON -DMOD_GLAXNIMATE=OFF -DMOD_GLAXNIMATE_QT6=ON -DCMAKE_INSTALL_PREFIX=/usr/local
+          sudo ninja install
+          cd ../..
+
+      - name: Build Kdenlive
+        run: |
+          mkdir build && cd build
+          cmake .. -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DRELEASE_BUILD=ON \
+            -DKDE_INSTALL_USE_QT_SYS_PATHS=ON \
+            -DBUILD_TESTING=OFF
+          ninja
+          sudo ninja install
+
+      - name: Prepare Artifacts
+        id: prep
+        run: |
+          RAND_ID=$(date +'%Y%m%d')-$(echo $GITHUB_SHA | cut -c1-7)
+          echo "VERSION_TAG=v-custom-${RAND_ID}" >> $GITHUB_OUTPUT
+          cd build
+          tar -czvf kdenlive-linux-x64.tar.gz bin/kdenlive lib/ share/ || tar -czvf kdenlive-linux-x64.tar.gz .
+          mv kdenlive-linux-x64.tar.gz ../
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prep.outputs.VERSION_TAG }}
+          name: Kdenlive Custom Build ${{ steps.prep.outputs.VERSION_TAG }}
+          draft: false
+          prerelease: false
+          files: |
+            kdenlive-linux-x64.tar.gz
+          body: |
+            Automated build for user x.
+            Base SHA: ${{ github.sha }}
+            Build ID: ${{ github.run_id }}
