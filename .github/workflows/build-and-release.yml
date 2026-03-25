@@ -1,4 +1,4 @@
-name: Kdenlive KF6 Build
+name: Kdenlive Professional Production Build
 
 on:
   push:
@@ -7,9 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: kdeneon/all-kf6-qt6:latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
 
@@ -19,22 +17,47 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Missing Build Tools
+      - name: Setup KDE Neon Repositories
         run: |
-          apt update
-          apt install -y build-essential git cmake ninja-build gettext \
+          wget -qO - https://archive.neon.kde.org/public.key | sudo apt-key add -
+          echo "deb http://archive.neon.kde.org/unstable/ jammy main" | sudo tee /etc/apt/sources.list.d/neon.list
+          sudo apt update
+
+      - name: Install Critical Build Toolchain
+        run: |
+          sudo apt install -y build-essential git cmake ninja-build gettext \
             python3-dev swig libarchive-dev libsdl2-dev libxml2-dev \
             libavdevice-dev librtaudio-dev libsox-dev libmovit-dev \
             librubberband-dev libebur128-dev libopencv-dev \
             libsamplerate0-dev libvidstab-dev libexif-dev libpango1.0-dev \
-            libvorbis-dev libopentimelineio-dev || echo "Some dev-tools already present"
+            libvorbis-dev
+
+      - name: Install Qt6 & KF6 SDK (From Neon Repo)
+        run: |
+          sudo apt install -y qt6-base-dev qt6-svg-dev qt6-multimedia-dev \
+            qt6-declarative-dev qml6-module-qtquick-controls qml6-module-qtquick-layouts \
+            libkf6archive-dev libkf6bookmarks-dev libkf6codecs-dev libkf6config-dev \
+            libkf6configwidgets-dev libkf6coreaddons-dev libkf6crash-dev \
+            libkf6dbusaddons-dev libkf6filemetadata-dev libkf6guiaddons-dev \
+            libkf6iconthemes-dev libkf6kio-dev libkf6newstuff-dev \
+            libkf6notifications-dev libkf6notifyconfig-dev libkf6purpose-dev \
+            libkf6solid-dev libkf6textwidgets-dev libkf6widgetsaddons-dev \
+            libkf6xmlgui-dev kf6-breeze-icon-theme
+
+      - name: Build & Install OpenTimelineIO
+        run: |
+          git clone --depth 1 https://github.com/PixarAnimationStudios/OpenTimelineIO.git
+          cd OpenTimelineIO && mkdir build && cd build
+          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DOTIO_PYTHON_INSTALL=OFF -DCMAKE_INSTALL_PREFIX=/usr
+          sudo ninja install
+          cd ../..
 
       - name: Build & Install MLT v7
         run: |
           git clone --depth 1 --recurse-submodules https://github.com/mltframework/mlt.git
           cd mlt && mkdir build && cd build
-          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DMOD_QT=OFF -DMOD_QT6=ON -DMOD_GLAXNIMATE_QT6=ON -DCMAKE_INSTALL_PREFIX=/usr
-          ninja install
+          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DMOD_QT=OFF -DMOD_QT6=ON -DCMAKE_INSTALL_PREFIX=/usr
+          sudo ninja install
           cd ../..
 
       - name: Build Kdenlive
@@ -47,26 +70,25 @@ jobs:
             -DBUILD_TESTING=OFF \
             -DCMAKE_INSTALL_PREFIX=/usr
           ninja
-          DESTDIR=/tmp/kdenlive_install ninja install
+          DESTDIR=/tmp/kdenlive_install sudo ninja install
 
       - name: Package AppImage
         run: |
-          apt install -y wget file
           wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
           chmod +x linuxdeploy*.AppImage
           export AppDir=/tmp/kdenlive_install
-          VERSION=$(date +%Y%m%d)-${GITHUB_SHA:0:7}
           export APPIMAGE_EXTRACT_AND_RUN=1
           ./linuxdeploy-x86_64.AppImage --appdir $AppDir --plugin qt --output appimage
+          VERSION=$(date +%Y%m%d)-${GITHUB_SHA:0:7}
           mv Kdenlive-x86_64.AppImage kdenlive-${VERSION}-x86_64.AppImage
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: rel-${{ github.run_id }}
-          name: "Kdenlive KF6 Container Build"
+          name: "Kdenlive KF6 Custom Release"
           files: "*.AppImage"
           body: |
-            Successfully built using KDE Neon KF6 Docker Image.
-            Hash: ${{ github.sha }}
+            Build via KDE Neon Repositories on Ubuntu 22.04.
+            This ensures all KF6/Qt6 dependencies are met.
