@@ -30,7 +30,7 @@ jobs:
             libavdevice-dev librtaudio-dev libsox-dev libmovit-dev \
             librubberband-dev libebur128-dev libopencv-dev \
             libsamplerate0-dev libvidstab-dev libexif-dev libpango1.0-dev \
-            libvorbis-dev
+            libvorbis-dev frei0r-plugins-dev
 
       - name: Install Qt6 & KF6 SDK (From Neon Repo)
         run: |
@@ -56,7 +56,10 @@ jobs:
         run: |
           git clone --depth 1 --recurse-submodules https://github.com/mltframework/mlt.git
           cd mlt && mkdir build && cd build
-          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DMOD_QT=OFF -DMOD_QT6=ON -DCMAKE_INSTALL_PREFIX=/usr
+          export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig:$PKG_CONFIG_PATH
+          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release \
+            -DMOD_QT=OFF -DMOD_QT6=ON \
+            -DCMAKE_INSTALL_PREFIX=/usr
           sudo ninja install
           cd ../..
 
@@ -79,6 +82,7 @@ jobs:
           chmod +x linuxdeploy*.AppImage
           export AppDir=/tmp/kdenlive_install
           export APPIMAGE_EXTRACT_AND_RUN=1
+          export LD_LIBRARY_PATH=/usr/lib:/usr/local/lib:$LD_LIBRARY_PATH
           ./linuxdeploy-x86_64.AppImage --appdir $AppDir --plugin qt --output appimage
           VERSION=$(date +%Y%m%d)-${GITHUB_SHA:0:7}
           mv Kdenlive-x86_64.AppImage kdenlive-${VERSION}-x86_64.AppImage
@@ -87,8 +91,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: rel-${{ github.run_id }}
-          name: "Kdenlive KF6 Custom Release"
+          name: "Kdenlive KF6 Release"
           files: "*.AppImage"
           body: |
-            Build via KDE Neon Repositories on Ubuntu 22.04.
-            This ensures all KF6/Qt6 dependencies are met.
+            Fix: Added frei0r-plugins-dev for MLT compatibility.
+            Build System: Ubuntu 22.04 + KDE Neon Repos.
