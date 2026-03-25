@@ -1,50 +1,62 @@
-name: Kdenlive Auto Build & Release
+name: Kdenlive KF6 High-Performance Build
 
 on:
   push:
-    branches:
-      - master
-      - main
+    branches: [ master, main ]
   workflow_dispatch:
 
 jobs:
-  build-linux:
+  build:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
 
     steps:
-      - name: Checkout Source
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install Dependencies
+      - name: Set up Environment & KDE Repos
         run: |
           sudo apt update
-          sudo apt install -y build-essential git cmake extra-cmake-modules ninja-build gettext
-          sudo apt install -y qt6-base-dev qt6-svg-dev qt6-multimedia-dev qt6-networkauth-dev \
-            qml6-module-qtqml-workerscript qml6-module-qtquick-window qml6-module-org-kde-desktop \
-            qt6-declarative-private-dev libkf6archive-dev libkf6bookmarks-dev libkf6codecs-dev \
-            libkf6config-dev libkf6configwidgets-dev libkf6coreaddons-dev libkf6crash-dev \
-            libkf6dbusaddons-dev libkf6doctools-dev libkf6filemetadata-dev libkf6guiaddons-dev \
-            libkf6iconthemes-dev libkf6kio-dev libkf6newstuff-dev libkf6notifications-dev \
-            libkf6notifyconfig-dev libkf6purpose-dev libkf6solid-dev libkf6textwidgets-dev \
-            libkf6widgetsaddons-dev libkf6xmlgui-dev kde-style-breeze
+          sudo add-apt-repository -y ppa:kubuntu-ppa/backports
+          sudo apt update
+
+      - name: Install Toolchain & Qt6
+        run: |
+          sudo apt install -y build-essential git cmake extra-cmake-modules ninja-build \
+            gettext qt6-base-dev qt6-svg-dev qt6-multimedia-dev qt6-networkauth-dev \
+            qt6-declarative-private-dev qml6-module-qtqml-workerscript \
+            qml6-module-qtquick-window qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-templates
+
+      - name: Install KF6 Dependencies (Fixed Names)
+        run: |
+          sudo apt install -y \
+            libkf6archive-dev libkf6bookmarks-dev libkf6codecs-dev libkf6config-dev \
+            libkf6configwidgets-dev libkf6coreaddons-dev libkf6crash-dev \
+            libkf6dbusaddons-dev libkf6doctools-dev libkf6filemetadata-dev \
+            libkf6guiaddons-dev libkf6iconthemes-dev libkf6kio-dev libkf6newstuff-dev \
+            libkf6notifications-dev libkf6notifyconfig-dev libkf6purpose-dev \
+            libkf6solid-dev libkf6textwidgets-dev libkf6widgetsaddons-dev \
+            libkf6xmlgui-dev kf6-breeze-icon-theme || \
+          sudo apt install -y libkf5archive-dev
+
+      - name: Install Multimedia Stack
+        run: |
           sudo apt install -y frei0r-plugins ffmpeg mediainfo ladspa-sdk libfftw3-dev \
             libarchive-dev libgdk-pixbuf-2.0-dev libsdl2-dev libxml2-dev libavdevice-dev \
-            librtaudio-dev libsox-dev frei0r-plugins-dev libmovit-dev librubberband-dev \
-            libswscale-dev libebur128-dev libopencv-dev libsamplerate0-dev libvidstab-dev \
-            libexif-dev libpango1.0-dev libvorbis-dev libavformat-dev libavcodec-dev \
+            librtaudio-dev libsox-dev libmovit-dev librubberband-dev libswscale-dev \
+            libebur128-dev libopencv-dev libsamplerate0-dev libvidstab-dev libexif-dev \
+            libpango1.0-dev libvorbis-dev libavformat-dev libavcodec-dev \
             libswresample-dev libavutil-dev libopentimelineio-dev
-          sudo apt install -y kddockwidgets-qt6-dev || echo "KDDockWidgets not found, will build later if needed"
 
-      - name: Build & Install MLT (Latest)
+      - name: Build MLT (Latest v7)
         run: |
-          git clone --recurse-submodules https://github.com/mltframework/mlt.git
-          cd mlt
-          mkdir build && cd build
-          cmake .. -GNinja -DMOD_QT=OFF -DMOD_QT6=ON -DMOD_GLAXNIMATE=OFF -DMOD_GLAXNIMATE_QT6=ON -DCMAKE_INSTALL_PREFIX=/usr/local
+          git clone --depth 1 --recurse-submodules https://github.com/mltframework/mlt.git
+          cd mlt && mkdir build && cd build
+          cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release -DMOD_QT=OFF -DMOD_QT6=ON -DMOD_GLAXNIMATE_QT6=ON -DCMAKE_INSTALL_PREFIX=/usr
           sudo ninja install
           cd ../..
 
@@ -55,29 +67,32 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DRELEASE_BUILD=ON \
             -DKDE_INSTALL_USE_QT_SYS_PATHS=ON \
-            -DBUILD_TESTING=OFF
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_INSTALL_PREFIX=/usr
           ninja
-          sudo ninja install
+          DESTDIR=/tmp/kdenlive_install sudo ninja install
 
-      - name: Prepare Artifacts
-        id: prep
+      - name: Package AppImage (Standalone)
         run: |
-          RAND_ID=$(date +'%Y%m%d')-$(echo $GITHUB_SHA | cut -c1-7)
-          echo "VERSION_TAG=v-custom-${RAND_ID}" >> $GITHUB_OUTPUT
-          cd build
-          tar -czvf kdenlive-linux-x64.tar.gz bin/kdenlive lib/ share/ || tar -czvf kdenlive-linux-x64.tar.gz .
-          mv kdenlive-linux-x64.tar.gz ../
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          chmod +x linuxdeploy*.AppImage
+          
+          # 准备 AppDir
+          export AppDir=/tmp/kdenlive_install
+          # 运行打包
+          VERSION=$(date +%Y%m%d)-${GITHUB_SHA:0:7}
+          ./linuxdeploy-x86_64.AppImage --appdir $AppDir --plugin qt --output appimage
+          mv Kdenlive-x86_64.AppImage kdenlive-${VERSION}-x86_64.AppImage
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.prep.outputs.VERSION_TAG }}
-          name: Kdenlive Custom Build ${{ steps.prep.outputs.VERSION_TAG }}
-          draft: false
-          prerelease: false
-          files: |
-            kdenlive-linux-x64.tar.gz
+          tag_name: build-${{ github.run_id }}-${{ github.run_number }}
+          name: "Kdenlive Custom Build (Auto-Gen)"
+          files: "*.AppImage"
           body: |
-            Automated build for user x.
-            Base SHA: ${{ github.sha }}
-            Build ID: ${{ github.run_id }}
+            ## Build Info
+            - **Commit**: ${{ github.sha }}
+            - **Environment**: Ubuntu 24.04 + KF6 SDK
+            - **Status**: Machine-Ready AppImage included.
